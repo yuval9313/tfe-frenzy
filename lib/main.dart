@@ -17,6 +17,7 @@ const Color tileBackgroundColor = Color.fromARGB(255, 198, 208, 212);
 
 const Map<int, Color> numTileColor = {
   2: Color.fromARGB(255, 242, 177, 121),
+  3: Colors.pink,
   4: Color.fromARGB(255, 242, 177, 121),
   8: Color.fromARGB(255, 242, 177, 121),
   16: Color.fromARGB(255, 242, 177, 121),
@@ -37,8 +38,8 @@ Future<void> main() async {
 }
 
 class Tile {
-  final int x;
-  final int y;
+  int x;
+  int y;
   int val;
 
   late Animation<double> animatedX;
@@ -207,18 +208,17 @@ class TwentyFourEightFrenzyState extends State<TwentyFourEightFrenzy>
     }
   }
 
-  void moveTile(int columnPos, double tileSize) {
+  void moveTile(int columnPos) {
     Tile emptyTilesInColumn =
         columns.toList()[columnPos].firstWhere((element) => element.val == 0);
-    int toAddLeft = (emptyTilesInColumn.x * tileSize).toInt();
-    int toAddTop = (emptyTilesInColumn.y * tileSize).toInt();
-    toAdd.first.moveTo(controller, toAddLeft, toAddTop);
+    toAdd.first.x = emptyTilesInColumn.x;
+    toAdd.first.y = emptyTilesInColumn.y;
   }
 
-  void addTile(int columnPos, double tileSize) {
+  void addTile(int columnPos) {
     Tile emptyTilesInColumn =
         columns.toList()[columnPos].firstWhere((element) => element.val == 0);
-    toAdd.add(Tile(emptyTilesInColumn.x, emptyTilesInColumn.y, 2));
+    toAdd.add(Tile(emptyTilesInColumn.x, emptyTilesInColumn.y, 4));
   }
 
   double left = 0;
@@ -246,10 +246,10 @@ class TwentyFourEightFrenzyState extends State<TwentyFourEightFrenzy>
                 builder: (context, child) => e.animatedValue.value == 0
                     ? const SizedBox()
                     : Positioned(
-                        left: e.animatedX.value * tileSize,
-                        top: e.animatedY.value * tileSize,
-                        width: gridWidthSize,
-                        height: gridHeightSize,
+                        left: e.x * tileSize,
+                        top: e.y * tileSize,
+                        width: tileSize,
+                        height: tileSize,
                         child: Center(
                           child: TextTile(
                             "${e.animatedValue.value}",
@@ -268,13 +268,13 @@ class TwentyFourEightFrenzyState extends State<TwentyFourEightFrenzy>
         onPanStart: (details) {
           if (toAdd.isEmpty) {
             left = max(0, left + details.localPosition.dx);
-            addTile(calculateColumn(left), tileSize);
+            addTile(calculateColumn(left));
             doSwipe();
           }
         },
         onPanUpdate: (details) {
           left = max(0, left + details.delta.dx);
-          moveTile(calculateColumn(left), tileSize);
+          moveTile(calculateColumn(left));
           doSwipe();
         },
         onPanEnd: (details) {
