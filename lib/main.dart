@@ -32,7 +32,7 @@ const Map<int, Color> numTileColor = {
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  SystemChrome.setEnabledSystemUIMode(SystemUiMode.leanBack);
+  SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
   runApp(const TwentyFourEightFrenzyApp());
 }
 
@@ -148,6 +148,7 @@ class TextTile extends StatelessWidget {
   final String value;
   final double tileSize;
   final Color tileBackgroundColor;
+
   const TextTile(this.value, this.tileSize, this.tileBackgroundColor,
       {super.key});
 
@@ -179,7 +180,9 @@ class TwentyFourEightFrenzyState extends State<TwentyFourEightFrenzy>
   late AnimationController controller;
   List<List<Tile>> grid = List.generate(
       gridHeight, (y) => List.generate(gridWidth, (x) => Tile(x, y, 0)));
+
   Iterable<Tile> get flattendGrid => grid.expand((row) => row);
+
   Iterable<List<Tile>> get columns => List.generate(
       gridWidth, (x) => List.generate(gridHeight, (y) => grid[y][x]));
   List<Tile> toAdd = [];
@@ -193,31 +196,32 @@ class TwentyFourEightFrenzyState extends State<TwentyFourEightFrenzy>
     );
     controller.addStatusListener((status) {
       if (status == AnimationStatus.completed) {
-        flattendGrid.forEach((element) {
+        for (var element in flattendGrid) {
           element.resetAnimation();
-        });
+        }
       }
     });
 
-    flattendGrid.forEach((element) => element.resetAnimation());
+    for (var element in flattendGrid) {
+      element.resetAnimation();
+    }
   }
 
-  void moveTile(int columnPos) {
+  void moveTile(int columnPos, double tileSize) {
     Tile emptyTilesInColumn =
         columns.toList()[columnPos].firstWhere((element) => element.val == 0);
-    toAdd.first.moveTo(controller, emptyTilesInColumn.x, emptyTilesInColumn.y);
+    int toAddLeft = (emptyTilesInColumn.x * tileSize).toInt();
+    int toAddTop = (emptyTilesInColumn.y * tileSize).toInt();
+    toAdd.first.moveTo(controller, toAddLeft, toAddTop);
   }
 
-  void addTile(int columnPos) {
+  void addTile(int columnPos, double tileSize) {
     Tile emptyTilesInColumn =
         columns.toList()[columnPos].firstWhere((element) => element.val == 0);
-    toAdd.add(Tile(emptyTilesInColumn.x, emptyTilesInColumn.y, 2)
-      ..appear(controller));
+    toAdd.add(Tile(emptyTilesInColumn.x, emptyTilesInColumn.y, 2));
   }
 
   double left = 0;
-  double ghostLeft = 0;
-  double ghostTop = 0;
 
   @override
   Widget build(BuildContext context) {
@@ -234,70 +238,51 @@ class TwentyFourEightFrenzyState extends State<TwentyFourEightFrenzy>
       return columnPos;
     }
 
-    Widget ghost = Positioned(
-      top: ghostTop,
-      left: ghostLeft,
-      child: Container(
-        width: tileSize,
-        height: tileSize,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(6.0),
-          color: tileBackgroundColor,
-        ),
-        child: TextTile("2", tileSize - gap, numTileColor[4]!),
-      ),
-    );
-
-    List<Widget> stackItems = initiateBoard(flattendGrid, tileSize, gap);
-    stackItems.addAll(
-      [flattendGrid, toAdd].expand((e) => e).map(
-            (e) => AnimatedBuilder(
-              animation: controller,
-              builder: (context, child) => e.animatedValue.value == 0
-                  ? const SizedBox()
-                  : Positioned(
-                      left: e.animatedX.value * tileSize,
-                      top: e.animatedY.value * tileSize,
-                      width: gridWidthSize,
-                      height: gridHeightSize,
-                      child: Center(
-                        child: TextTile(
-                          "${e.animatedValue.value}",
-                          (tileSize - gap) * e.scale.value,
-                          numTileColor[e.animatedValue.value]!,
+    List<Widget> stackItems = initiateBoard(flattendGrid, tileSize, gap)
+      ..addAll(
+        [flattendGrid, toAdd].expand((e) => e).map(
+              (e) => AnimatedBuilder(
+                animation: controller,
+                builder: (context, child) => e.animatedValue.value == 0
+                    ? const SizedBox()
+                    : Positioned(
+                        left: e.animatedX.value * tileSize,
+                        top: e.animatedY.value * tileSize,
+                        width: gridWidthSize,
+                        height: gridHeightSize,
+                        child: Center(
+                          child: TextTile(
+                            "${e.animatedValue.value}",
+                            (tileSize - gap) * e.scale.value,
+                            numTileColor[e.animatedValue.value]!,
+                          ),
                         ),
                       ),
-                    ),
+              ),
             ),
-          ),
-    );
-    stackItems.add(ghost);
+      );
 
     return Scaffold(
       backgroundColor: tan,
       body: GestureDetector(
         onPanStart: (details) {
-          left = max(0, left + details.localPosition.dx);
-          addTile(calculateColumn(left));
-          doSwipe();
+          if (toAdd.isEmpty) {
+            left = max(0, left + details.localPosition.dx);
+            addTile(calculateColumn(left), tileSize);
+            doSwipe();
+          }
         },
         onPanUpdate: (details) {
           left = max(0, left + details.delta.dx);
-          int columnPos = calculateColumn(left);
-          Tile emptyTilesInColumn = columns
-              .toList()[columnPos]
-              .firstWhere((element) => element.val == 0);
-
-          ghostLeft = (emptyTilesInColumn.x * tileSize).toDouble();
-          ghostTop = (emptyTilesInColumn.y * tileSize).toDouble();
-
-          moveTile(calculateColumn(left));
+          moveTile(calculateColumn(left), tileSize);
           doSwipe();
         },
         onPanEnd: (details) {
-          left = 0;
-          toAdd.clear();
-          doSwipe();
+          if (toAdd.isNotEmpty) {
+            left = 0;
+            toAdd.clear();
+            doSwipe();
+          }
         },
         child: Container(
           padding: const EdgeInsets.only(top: borderPadding + gap),
@@ -333,8 +318,11 @@ class TwentyFourEightFrenzyState extends State<TwentyFourEightFrenzy>
   }
 
   bool canSwipeLeft() => grid.any(canSwipe);
+
   bool canSwipeRight() => grid.map((e) => e.reversed.toList()).any(canSwipe);
+
   bool canSwipeUp() => columns.any(canSwipe);
+
   bool canSwipeDown() => columns.map((e) => e.reversed.toList()).any(canSwipe);
 
   bool canSwipe(List<Tile> tiles) {
@@ -355,8 +343,11 @@ class TwentyFourEightFrenzyState extends State<TwentyFourEightFrenzy>
   }
 
   void swipeLeft() => grid.forEach(mergeTiles);
+
   void swipeRight() => grid.map((e) => e.reversed.toList()).forEach(mergeTiles);
+
   void swipeUp() => columns.forEach(mergeTiles);
+
   void swipeDown() =>
       columns.map((e) => e.reversed.toList()).forEach(mergeTiles);
 
