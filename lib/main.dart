@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
@@ -38,8 +39,8 @@ Future<void> main() async {
 }
 
 class Tile {
-  int x;
-  int y;
+  final int x;
+  final int y;
   int val;
 
   late Animation<double> animatedX;
@@ -58,7 +59,7 @@ class Tile {
     scale = const AlwaysStoppedAnimation(1.0);
   }
 
-  void moveTo(Animation<double> parent, int x, int y) {
+  void moveToAnimated(Animation<double> parent, int x, int y) {
     animatedX = Tween<double>(
       begin: x.toDouble(),
       end: x.toDouble(),
@@ -100,7 +101,15 @@ class Tile {
       TweenSequenceItem(tween: ConstantTween(val), weight: 0.01),
       TweenSequenceItem(tween: ConstantTween(newValue), weight: 0.99),
     ]).animate(CurvedAnimation(parent: parent, curve: const Interval(0, 0.5)));
+    val = newValue;
   }
+}
+
+class Cluster {
+  final Tile leader;
+  final List<Tile> tiles;
+
+  Cluster(this.leader, this.tiles);
 }
 
 class TwentyFourEightFrenzyApp extends StatelessWidget {
@@ -180,12 +189,10 @@ class TwentyFourEightFrenzyState extends State<TwentyFourEightFrenzy>
     with SingleTickerProviderStateMixin {
   late AnimationController controller;
   List<List<Tile>> grid = List.generate(
-      gridHeight, (y) => List.generate(gridWidth, (x) => Tile(x, y, 0)));
+      gridWidth, (x) => List.generate(gridHeight, (y) => Tile(x, y, 0)));
 
-  Iterable<Tile> get flattendGrid => grid.expand((row) => row);
+  Iterable<Tile> get flattendGrid => grid.expand((col) => col);
 
-  Iterable<List<Tile>> get columns => List.generate(
-      gridWidth, (x) => List.generate(gridHeight, (y) => grid[y][x]));
   List<Tile> toAdd = [];
 
   @override
@@ -203,22 +210,41 @@ class TwentyFourEightFrenzyState extends State<TwentyFourEightFrenzy>
       }
     });
 
+    grid[0][0].val = 16;
+    grid[0][1].val = 4;
+    grid[0][2].val = 16;
+    grid[1][0].val = 4;
+    grid[2][0].val = 8;
+
     for (var element in flattendGrid) {
       element.resetAnimation();
     }
   }
 
-  void moveTile(int columnPos) {
+  void addTile(int columnPos) {
+    toAdd.clear();
     Tile emptyTilesInColumn =
-        columns.toList()[columnPos].firstWhere((element) => element.val == 0);
-    toAdd.first.x = emptyTilesInColumn.x;
-    toAdd.first.y = emptyTilesInColumn.y;
+        grid[columnPos].firstWhere((element) => element.val == 0);
+    toAdd.add(Tile(emptyTilesInColumn.x, emptyTilesInColumn.y, 4));
+    toAdd.first
+        .moveToAnimated(controller, emptyTilesInColumn.x, emptyTilesInColumn.y);
   }
 
-  void addTile(int columnPos) {
-    Tile emptyTilesInColumn =
-        columns.toList()[columnPos].firstWhere((element) => element.val == 0);
-    toAdd.add(Tile(emptyTilesInColumn.x, emptyTilesInColumn.y, 4));
+  void moveColumn(int columnPos) {
+    Tile? emptyTilesInColumn =
+        grid[columnPos].firstWhereOrNull((element) => element.val == 0);
+    if (emptyTilesInColumn == null || emptyTilesInColumn.y == gridHeight - 1) {
+      return;
+    }
+    Iterable<Tile> tilesInColumn = grid[columnPos]
+        .skip(emptyTilesInColumn.y + 1)
+        .takeWhile((element) => element.val != 0);
+    for (var element in tilesInColumn) {
+      element.moveToAnimated(controller, element.x, element.y - 1);
+      grid[element.x][max(0, element.y - 1)]
+          .changeNumber(controller, element.val);
+      element.changeNumber(controller, 0);
+    }
   }
 
   double left = 0;
@@ -246,8 +272,8 @@ class TwentyFourEightFrenzyState extends State<TwentyFourEightFrenzy>
                 builder: (context, child) => e.animatedValue.value == 0
                     ? const SizedBox()
                     : Positioned(
-                        left: e.x * tileSize,
-                        top: e.y * tileSize,
+                        left: e.animatedX.value * tileSize,
+                        top: e.animatedY.value * tileSize,
                         width: tileSize,
                         height: tileSize,
                         child: Center(
@@ -269,19 +295,23 @@ class TwentyFourEightFrenzyState extends State<TwentyFourEightFrenzy>
           if (toAdd.isEmpty) {
             left = max(0, left + details.localPosition.dx);
             addTile(calculateColumn(left));
-            doSwipe();
+            setState(() {
+              controller.forward(from: 0.0);
+            });
           }
         },
         onPanUpdate: (details) {
           left = max(0, left + details.delta.dx);
-          moveTile(calculateColumn(left));
-          doSwipe();
+          addTile(calculateColumn(left));
+          setState(() {
+            controller.forward(from: 0.0);
+          });
         },
         onPanEnd: (details) {
           if (toAdd.isNotEmpty) {
             left = 0;
+            doSwipe(toAdd.first);
             toAdd.clear();
-            doSwipe();
           }
         },
         child: Container(
@@ -311,72 +341,114 @@ class TwentyFourEightFrenzyState extends State<TwentyFourEightFrenzy>
     );
   }
 
-  void doSwipe() {
+  List<Tile> calculateToCheck(Tile original) {
+    int beforeCol = max(0, original.x - 1);
+    int beforeRow = max(0, original.y - 1);
+    int afterCol = min(gridWidth - 1, original.x + 1);
+
+    List<Tile> toCheck = [
+      grid[beforeCol][original.y],
+      grid[original.x][beforeRow],
+      grid[afterCol][original.y],
+    ];
+    return toCheck;
+  }
+
+  void doSwipe(Tile original) {
+    List<Tile> toCheck = calculateToCheck(original);
     setState(() {
+      mergeTiles(original, toCheck);
+      controller.forward(from: 0.0);
+      for (int i = 0; i < gridWidth; i++) {
+        moveColumn(i);
+      }
+      List<Cluster> clusters = findClusters();
+      if (clusters.isNotEmpty) {
+        mergeClusters(clusters);
+      }
       controller.forward(from: 0.0);
     });
   }
 
-  bool canSwipeLeft() => grid.any(canSwipe);
+  void mergeTiles(Tile original, List<Tile> toCheck) {
+    Iterable<Tile> mergable = toCheck
+        .where((element) => element.val != 0 && element.val == original.val);
 
-  bool canSwipeRight() => grid.map((e) => e.reversed.toList()).any(canSwipe);
+    int resultValue = original.val;
+    for (var element in mergable) {
+      if (element != original) {
+        resultValue *= 2;
+        element.moveToAnimated(controller, original.x, original.y);
+        element.changeNumber(controller, 0);
+      }
+    }
+    if (resultValue != original.val) {
+      original.bounce(controller);
+    }
+    grid[original.x][original.y].changeNumber(controller, resultValue);
+  }
 
-  bool canSwipeUp() => columns.any(canSwipe);
+  List<Cluster> findClusters() {
+    List<Cluster> clusters = [];
+    Set<Tile> visited = {};
 
-  bool canSwipeDown() => columns.map((e) => e.reversed.toList()).any(canSwipe);
-
-  bool canSwipe(List<Tile> tiles) {
-    for (int i = 0; i < tiles.length - 1; i++) {
-      if (tiles[i].val == 0) {
-        if (tiles.skip(i + 1).any((element) => element.val != 0)) {
-          return true;
+    for (var column in grid) {
+      for (var element in column) {
+        if (visited.contains(element)) {
+          continue;
         }
-      } else if (tiles[i].val != 0 && tiles[i].val == tiles[i + 1].val) {
-        Tile? nextNonZero =
-            tiles.skip(i + 1).firstWhereOrNull((element) => element.val != 0);
-        if (nextNonZero != null && nextNonZero.val == tiles[i].val) {
-          return true;
+
+        List<Tile> adjecentTiles = [];
+        List<Map<String, int>> checksPoints = [
+          {"y": element.y, "x": max(0, element.x - 1)},
+          {"y": element.y, "x": min(gridWidth - 1, element.x + 1)},
+          {"x": element.x, "y": max(0, element.y - 1)},
+          {"x": element.x, "y": min(gridHeight - 1, element.y + 1)},
+        ];
+
+        for (var check in checksPoints) {
+          Tile tile = grid[check['x']!][check['y']!];
+          if (tile.val != 0 && tile.val == element.val && tile != element) {
+            adjecentTiles.add(tile);
+          }
+        }
+
+        if (adjecentTiles.length > 1) {
+          adjecentTiles.add(element);
+          adjecentTiles.sort((tile1, tile2) =>
+              countAdjacentTiles(tile2).compareTo(countAdjacentTiles(tile1)));
+          Tile leader = adjecentTiles.first;
+          clusters.add(Cluster(leader, adjecentTiles));
+          visited.add(leader);
+          visited.addAll(adjecentTiles);
         }
       }
     }
-    return false;
+
+    return clusters;
   }
 
-  void swipeLeft() => grid.forEach(mergeTiles);
+  int countAdjacentTiles(Tile tile) {
+    int count = 0;
+    if (tile.x > 0 && grid[tile.x - 1][tile.y].val == tile.val) count++;
+    if (tile.x < gridWidth - 1 && grid[tile.x + 1][tile.y].val == tile.val)
+      count++;
+    if (tile.y > 0 && grid[tile.x][tile.y - 1].val == tile.val) count++;
+    if (tile.y < gridHeight - 1 && grid[tile.x][tile.y + 1].val == tile.val)
+      count++;
+    return count;
+  }
 
-  void swipeRight() => grid.map((e) => e.reversed.toList()).forEach(mergeTiles);
-
-  void swipeUp() => columns.forEach(mergeTiles);
-
-  void swipeDown() =>
-      columns.map((e) => e.reversed.toList()).forEach(mergeTiles);
-
-  void mergeTiles(List<Tile> tiles) {
-    for (int i = 0; i < tiles.length - 1; i++) {
-      Iterable<Tile> toCheck =
-          tiles.skip(i).skipWhile((value) => value.val == 0);
-      if (toCheck.isNotEmpty) {
-        Tile t = toCheck.first;
-        Tile? merge =
-            toCheck.skip(1).firstWhereOrNull((element) => element.val != 0);
-        if (merge != null && merge.val != t.val) {
-          merge = null;
-        }
-        if (tiles[i] != t || merge != null) {
-          int resultValue = t.val;
-          t.moveTo(controller, tiles[i].x, tiles[i].y);
-          if (merge != null) {
-            resultValue += merge.val;
-            merge.moveTo(controller, tiles[i].x, tiles[i].y);
-            merge.bounce(controller);
-            merge.changeNumber(controller, resultValue);
-            merge.val = 0;
-            t.changeNumber(controller, 0);
-          }
-          t.val = 0;
-          tiles[i].val = resultValue;
-        }
+  void mergeClusters(List<Cluster> clusters) {
+    for (Cluster cluster in clusters) {
+      int resultValue = cluster.leader.val * (2 ^ cluster.tiles.length);
+      for (Tile tile in cluster.tiles) {
+        grid[tile.x][tile.y]
+            .moveToAnimated(controller, cluster.leader.x, cluster.leader.y);
+        grid[tile.x][tile.y].changeNumber(controller, 0);
       }
+      grid[cluster.leader.x][cluster.leader.y]
+          .changeNumber(controller, resultValue);
     }
   }
 }
